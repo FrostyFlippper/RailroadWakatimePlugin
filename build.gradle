@@ -1,0 +1,56 @@
+plugins {
+    id 'java'
+    id 'maven-publish' // For publishing your plugin artifact to a Maven repository
+    id 'org.openjfx.javafxplugin' version '0.1.0' // If your plugin uses JavaFX for UI
+}
+
+group = 'com.FrostyFlippper' // Replace with your unique group ID
+version = '1.0.0-SNAPSHOT' // Replace with your plugin's version (use -SNAPSHOT for development)
+
+java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(21)) // Set your desired Java version (e.g., 17, 21)
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release.set(21) // Ensure compatibility with the specified Java version
+}
+
+repositories {
+    mavenCentral() // Standard Maven Central repository
+    maven { url 'https://maven.railroadide.dev/releases' }
+}
+
+// JavaFX configuration, if the 'org.openjfx.javafxplugin' is applied
+javafx {
+    version = '21.0.2' // Match your Java version or a compatible one
+    modules = [ 'javafx.controls', 'javafx.graphics' ] // Add necessary JavaFX modules
+}
+
+dependencies {
+    // Railroad Plugin API - essential for all Railroad plugins
+    // Replace 'x.y.z' with the actual version of the Railroad Plugin API you are targeting
+    // A list of available versions can be found at https://maven.railroadide.dev/#/releases/dev/railroadide/RailroadPluginAPI
+    compileOnly 'dev.railroadide:RailroadPluginAPI:1.0.2'
+
+    // JavaFX dependencies (if using JavaFX for UI)
+    implementation 'org.openjfx:javafx-controls'
+    implementation 'org.openjfx:javafx-graphics'
+    implementation 'com.google.code.gson:gson:2.13.1'
+
+    // Lombok - useful for reducing boilerplate code (requires annotationProcessor)
+    compileOnly 'org.projectlombok:lombok:1.18.32' // Use the latest version
+    annotationProcessor 'org.projectlombok:lombok:1.18.32' // Use the latest version
+
+    // Add any other third-party dependencies your plugin needs here
+    // implementation 'com.google.code.gson:gson:2.10.1'
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+        }
+    }
+}

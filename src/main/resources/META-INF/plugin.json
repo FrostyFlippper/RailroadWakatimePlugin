@@ -1,0 +1,9 @@
+{
+  "id": "wakatime-plugin",
+  "name": "Wakatime Plugin",
+  "version": "1.0.0",
+  "mainClass": "org.FrostyFlippper.WakatimePlugin",
+  "author": "FrostyFlippper",
+  "description": "A plugin that does awesome things.",
+  "license": "MIT"
+}
