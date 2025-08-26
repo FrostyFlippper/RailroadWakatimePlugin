@@ -184,7 +184,7 @@ public class WakatimePlugin implements Plugin {
             cmds.add("--category");
             cmds.add("building");
         }
-        if (WakaTime.METRICS)
+        /*if (WakaTime.METRICS)
             cmds.add("--metrics");
 
         String proxy = getBuiltinProxy();
@@ -192,7 +192,7 @@ public class WakatimePlugin implements Plugin {
             WakaTime.log.info("built-in proxy will be used: " + proxy);
             cmds.add("--proxy");
             cmds.add(proxy);
-        }
+        }*/
 
         if (!extraHeartbeats.isEmpty())
             cmds.add("--extra-heartbeats");
