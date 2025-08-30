@@ -1,23 +1,27 @@
 package org.FrostyFlippper;
 
-import com.google.gson.Gson;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonPrimitive;
+import com.google.gson.*;
+import dev.railroadide.core.gson.GsonLocator;
 import dev.railroadide.core.secure_storage.SecureTokenStore;
 import dev.railroadide.railroadpluginapi.Plugin;
 import dev.railroadide.railroadpluginapi.PluginContext;
+import dev.railroadide.railroadpluginapi.dto.Document;
 import dev.railroadide.railroadpluginapi.events.FileEvent;
 import dev.railroadide.railroadpluginapi.events.FileModifiedEvent;
 import dev.railroadide.railroadpluginapi.services.ApplicationInfoService;
 
+import javax.naming.Context;
+import java.awt.*;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
+import java.math.BigDecimal;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -32,6 +36,7 @@ import java.util.concurrent.TimeUnit;
 
 public class WakatimePlugin implements Plugin {
     private SecureTokenStore tokenStore;
+    private static final Gson GSON = GsonLocator.getInstance();
 
     @Override
     public void onEnable(PluginContext context) {
@@ -73,26 +78,18 @@ public class WakatimePlugin implements Plugin {
             wakatimeLocation.resolve("wakatime-cli-%s-%s".formatted(osName, architecture)).toFile().setExecutable(true);
         }
 
-        // 9. add event listeners for file activation, saving and modifying
-        context.getEventBus().subscribe(FileEvent.class, event -> {
-            if (event.isActivated()) {
-
-            } else if (event.isSaved()) {
-
-            }
-        });
-
-        context.getEventBus().subscribe(FileModifiedEvent.class, event -> {
-
-        });
-
         // 10. setup a queue of "heartbeat"s (https://github.com/wakatime/jetbrains-wakatime/blob/bf0e28dd706963eca2add7a793fb89d965302024/src/com/wakatime/intellij/plugin/Heartbeat.java#L13-L24)
         Queue<Heartbeat> heartbeatQueue = new ConcurrentLinkedQueue<>();
+
+        // 9. add event listeners for file activation, saving and modifying
+
+        eventListenerShit(context, heartbeatQueue);
+
 
         // 11. have a thread that runs every 30 seconds
         String pluginVersion = context.getDescriptor().getVersion();
         ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
-        scheduler.scheduleAtFixedRate(() -> runHeartbeat(heartbeatQueue, applicationInfoService, pluginVersion), 0, 30, TimeUnit.SECONDS);
+        scheduler.scheduleAtFixedRate(() -> runHeartbeatQueue(heartbeatQueue, applicationInfoService, pluginVersion), 0, 30, TimeUnit.SECONDS);
 
 
         // 21. do this for each of the events
@@ -100,8 +97,69 @@ public class WakatimePlugin implements Plugin {
         //      2. add a heartbeat to the heartbeat queue
     }
 
+    public void eventListenerShit(PluginContext context, Queue<Heartbeat> heartbeatQueue){
+        context.getEventBus().subscribe(FileEvent.class, event -> {
+            if (event.isActivated()) {
+                if(KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow() != null){
+                    Document file = event.file();
+                    heartbeatQueue.add(new Heartbeat.Builder()
+                            .setEntity(file.getPath().toString())
+                            .setLineCount((int) file.getContentAsString().lines().count())
+                            //TODO - requires railroad implementation
+                            //.setLineNumber()
+                            //.setCursorPosition()
+                            .setTimestamp(new BigDecimal((System.currentTimeMillis() / 1000.0)).setScale(4, BigDecimal.ROUND_HALF_UP))
+                            .setWrite(true)
+                            //TODO - requires railroad implementation
+                            .setUnsavedFile(false)
+                            //.setProject()
+                            //.setLanguage()
+                            .setBuilding(false)
+                            .build());
+                }
+            } else if (event.isSaved()) {
+                if(KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow() != null){
+                    Document file = event.file();
+                    heartbeatQueue.add(new Heartbeat.Builder()
+                            .setEntity(file.getPath().toString())
+                            .setLineCount((int) file.getContentAsString().lines().count())
+                            //TODO - requires railroad implementation
+                            //.setLineNumber()
+                            //.setCursorPosition()
+                            .setTimestamp(new BigDecimal((System.currentTimeMillis() / 1000.0)).setScale(4, BigDecimal.ROUND_HALF_UP))
+                            .setWrite(true)
+                            //TODO - requires railroad implementation
+                            .setUnsavedFile(true)
+                            //.setProject()
+                            //.setLanguage()
+                            .setBuilding(false)
+                            .build());
+                }
+            }
+        });
 
-    public void runHeartbeat(Queue<Heartbeat> heartbeatQueue, ApplicationInfoService applicationInfoService, String currentVersion) {
+        context.getEventBus().subscribe(FileModifiedEvent.class, event -> {
+            if(KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow() != null){
+                    Document file = event.file();
+                    heartbeatQueue.add(new Heartbeat.Builder()
+                            .setEntity(file.getPath().toString())
+                            .setLineCount((int) file.getContentAsString().lines().count())
+                            //TODO - requires railroad implementation
+                            //.setLineNumber()
+                            //.setCursorPosition()
+                            .setTimestamp(new BigDecimal((System.currentTimeMillis() / 1000.0)).setScale(4, BigDecimal.ROUND_HALF_UP))
+                            .setWrite(true)
+                            //TODO - requires railroad implementation
+                            .setUnsavedFile(false)
+                            //.setProject()
+                            //.setLanguage()
+                            .setBuilding(false)
+                            .build());
+                }
+        });
+    }
+
+    public void runHeartbeatQueue(Queue<Heartbeat> heartbeatQueue, ApplicationInfoService applicationInfoService, String currentVersion) {
         // [Start Thread]
         // 12. get api key from SecureTokenStore
         String retrievedApiKey = tokenStore.getToken("WakatimeApiKey");
@@ -125,62 +183,86 @@ public class WakatimePlugin implements Plugin {
         String[] command = buildCliCommand(initialHeartbeat, retrievedApiKey, additionalHeartbeats, applicationInfoService, currentVersion);
 
         // 16. execute the command
-        ProcessBuilder processBuilder = new ProcessBuilder(command);
+        Process process;
+        try {
+            process = new ProcessBuilder(command).start();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
 
-        // 17. turn the extra heartbeats into a json string (array), containing all the heartbeat's data in each object
-
+        // 17. turn the extra heartbeats into a json array, containing all the heartbeat's data in each object
+        JsonArray jsonArray = new JsonArray();
+        for(Heartbeat heartbeat : additionalHeartbeats){
+            jsonArray.add(GSON.toJsonTree(heartbeat));
+        }
 
         // 18. write the json string to the command's output stream
+        try {
+            OutputStream outputStream = process.getOutputStream();
+            outputStream.write(GSON.toJson(jsonArray).getBytes(StandardCharsets.UTF_8));
 
+            // 19. write a newline character
+            outputStream.write("\n".getBytes());
 
-        // 19. write a newline character
-
-
-        // 20. flush and close the stream
-
-
-        // [End Thread]
+            // 20. flush and close the stream
+            outputStream.flush();
+            outputStream.close();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private static String[] buildCliCommand(Heartbeat heartbeat, String apiKey, List<Heartbeat> extraHeartbeats, ApplicationInfoService applicationInfoService, String currentVersion) {
+        //reference types cuz they may be null
+        String entity = heartbeat.getEntity();
+        BigDecimal timestamp = heartbeat.getTimestamp();
+        Integer lineCount = heartbeat.getLineCount();
+        Integer lineNumber = heartbeat.getLineNumber();
+        Integer cursorPosition = heartbeat.getCursorPosition();
+        String project = heartbeat.getProject();
+        String language = heartbeat.getLanguage();
+        Boolean isWrite = heartbeat.isWrite();
+        Boolean isUnsavedFile = heartbeat.isUnsavedFile();
+        Boolean isBuilding = heartbeat.isBuilding();
+
         List<String> cmds = new ArrayList<>();
         cmds.add(getWakatimeCliLocation().toString());
         cmds.add("--plugin");
         String plugin = getPluginString(applicationInfoService, currentVersion);
         cmds.add(plugin);
         cmds.add("--entity");
-        cmds.add(heartbeat.entity);
+        cmds.add(entity);
         cmds.add("--time");
-        cmds.add(heartbeat.timestamp.toPlainString());
+        cmds.add(timestamp.toPlainString());
         if (!apiKey.isEmpty()) {
             cmds.add("--key");
             cmds.add(apiKey);
         }
-        if (heartbeat.lineCount != null) {
+        if (lineCount != null) {
             cmds.add("--lines-in-file");
-            cmds.add(heartbeat.lineCount.toString());
+            cmds.add(lineCount.toString());
         }
-        if (heartbeat.lineNumber != null) {
+        if (lineNumber != null) {
             cmds.add("--lineno");
-            cmds.add(heartbeat.lineNumber.toString());
+            cmds.add(lineNumber.toString());
         }
-        if (heartbeat.cursorPosition != null) {
+        if (cursorPosition != null) {
             cmds.add("--cursorpos");
-            cmds.add(heartbeat.cursorPosition.toString());
+            cmds.add(cursorPosition.toString());
         }
-        if (heartbeat.project != null) {
+        if (project != null) {
             cmds.add("--alternate-project");
-            cmds.add(heartbeat.project);
+            cmds.add(project);
         }
-        if (heartbeat.language != null) {
+        if (language != null) {
             cmds.add("--alternate-language");
-            cmds.add(heartbeat.language);
+            cmds.add(language);
         }
-        if (heartbeat.isWrite)
+        if (isWrite)
             cmds.add("--write");
-        if (heartbeat.isUnsavedFile)
+        if (isUnsavedFile)
             cmds.add("--is-unsaved-entity");
-        if (heartbeat.isBuilding) {
+        if (isBuilding) {
             cmds.add("--category");
             cmds.add("building");
         }
