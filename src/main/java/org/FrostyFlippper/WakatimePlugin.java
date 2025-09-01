@@ -2,10 +2,15 @@ package org.FrostyFlippper;
 
 import com.google.gson.*;
 import dev.railroadide.core.gson.GsonLocator;
+import dev.railroadide.core.registry.Registry;
 import dev.railroadide.core.secure_storage.SecureTokenStore;
+import dev.railroadide.core.settings.DefaultSettingCodecs;
+import dev.railroadide.core.settings.Setting;
+import dev.railroadide.core.settings.SettingCategory;
 import dev.railroadide.logger.Logger;
 import dev.railroadide.railroadpluginapi.Plugin;
 import dev.railroadide.railroadpluginapi.PluginContext;
+import dev.railroadide.railroadpluginapi.Registries;
 import dev.railroadide.railroadpluginapi.dto.Document;
 import dev.railroadide.railroadpluginapi.events.FileEvent;
 import dev.railroadide.railroadpluginapi.events.FileModifiedEvent;
@@ -41,9 +46,57 @@ public class WakatimePlugin implements Plugin {
     private static final SecureTokenStore TOKEN_STORE = new SecureTokenStore("WakatimePlugin");
     private static final ScheduledExecutorService SCHEDULER = Executors.newScheduledThreadPool(1);
 
+    private Setting<String> proxySetting;
+    private Setting<Boolean> doesShowInStatusBarSetting;
+    private Setting<Boolean> isDebugSetting;
+
     @Override
     public void onEnable(PluginContext context) {
         logger = context.getLogger();
+
+        Registry<Setting<?>> settingRegistry = Registries.getSettingsRegistry(context);
+        proxySetting = Setting.builder(String.class, "wakatime:proxy")
+                .treePath("plugins.wakatime")
+                .title("wakatime.proxy.title")
+                .description("wakatime.proxy.description")
+                .codec(DefaultSettingCodecs.STRING)
+                .category(SettingCategory.builder("wakatime:category")
+                        .title("wakatime.category.title")
+                        .noDescription().build())
+                .defaultValue("")
+                .build();
+
+        doesShowInStatusBarSetting = Setting.builder(Boolean.class, "wakatime:does_show_in_status_bar")
+                .treePath("plugins.wakatime")
+                .title("wakatime.does_show_in_status_bar.title")
+                .description("wakatime.does_show_in_status_bar.description")
+                .codec(DefaultSettingCodecs.BOOLEAN)
+                .category(SettingCategory.builder("wakatime:category")
+                        .title("wakatime.category.title")
+                        .noDescription().build())
+                .defaultValue(true)
+                .build();
+
+        isDebugSetting = Setting.builder(Boolean.class, "wakatime:is_debug")
+                .treePath("plugins.wakatime")
+                .title("wakatime.is_debug.title")
+                .description("wakatime.is_debug.description")
+                .codec(DefaultSettingCodecs.BOOLEAN)
+                .category(SettingCategory.builder("wakatime:category")
+                        .title("wakatime.category.title")
+                        .noDescription().build())
+                .defaultValue(false)
+                .build();
+
+        settingRegistry.register(proxySetting.getId(), proxySetting);
+        context.getLogger().info("Setting '" + proxySetting.getId() + "' registered.");
+
+        settingRegistry.register(doesShowInStatusBarSetting.getId(), doesShowInStatusBarSetting);
+        context.getLogger().info("Setting '" + doesShowInStatusBarSetting.getId() + "' registered.");
+
+        settingRegistry.register(isDebugSetting.getId(), isDebugSetting);
+        context.getLogger().info("Setting '" + isDebugSetting.getId() + "' registered.");
+
 
         Path wakatimeLocation = getWakatimeLocation();
         logger.debug("Wakatime location set to " + wakatimeLocation.toString());
@@ -69,6 +122,7 @@ public class WakatimePlugin implements Plugin {
         String architecture = architecture();
         logger.debug("Architecture: {}", architecture);
 
+        // TODO: filePath might be null
         Path filePath = downloadWakatimeCLI(latestVersion, osName, architecture, wakatimeLocation);
         logger.debug("File path: {}", filePath);
 
@@ -90,6 +144,29 @@ public class WakatimePlugin implements Plugin {
         String pluginVersion = context.getDescriptor().getVersion();
         ApplicationInfoService applicationInfoService = context.getService(ApplicationInfoService.class);
         SCHEDULER.scheduleAtFixedRate(() -> runHeartbeatQueue(heartbeatQueue, applicationInfoService, pluginVersion), 0, 30, TimeUnit.SECONDS);
+    }
+
+    @Override
+    public void onDisable(PluginContext context) {
+        Registry<Setting<?>> settingRegistry = Registries.getSettingsRegistry(context);
+        try {
+            if (proxySetting != null) {
+                settingRegistry.unregister(proxySetting.getId());
+                context.getLogger().info("Setting '" + proxySetting.getId() + "' unregistered.");
+            }
+
+            if (doesShowInStatusBarSetting != null) {
+                settingRegistry.unregister(doesShowInStatusBarSetting.getId());
+                context.getLogger().info("Setting '" + doesShowInStatusBarSetting.getId() + "' unregistered.");
+            }
+
+            if (isDebugSetting != null) {
+                settingRegistry.unregister(isDebugSetting.getId());
+                context.getLogger().info("Setting '" + isDebugSetting.getId() + "' unregistered.");
+            }
+        } catch (Exception exception) {
+            context.getLogger().warn("Failed to unregister setting", exception);
+        }
     }
 
     public void addEventListeners(PluginContext context, Queue<Heartbeat> heartbeatQueue) {
@@ -200,7 +277,7 @@ public class WakatimePlugin implements Plugin {
         }
     }
 
-    private static String[] buildCliCommand(Heartbeat heartbeat, String apiKey, List<Heartbeat> extraHeartbeats, ApplicationInfoService applicationInfoService, String currentVersion) {
+    private String[] buildCliCommand(Heartbeat heartbeat, String apiKey, List<Heartbeat> extraHeartbeats, ApplicationInfoService applicationInfoService, String currentVersion) {
         List<String> cmds = new ArrayList<>();
         cmds.add(getWakatimeCliLocation().toString());
 
@@ -257,26 +334,22 @@ public class WakatimePlugin implements Plugin {
             cmds.add("building");
         }
 
-        /*if (WakaTime.METRICS)
-            cmds.add("--metrics");
+        if(Boolean.TRUE.equals(isDebugSetting.getValue())){
+            cmds.add("--verbose");
+        }
 
-        String proxy = getBuiltinProxy();
+        String proxy = proxySetting.getValue();
         if (proxy != null) {
-            WakaTime.debug.info("built-in proxy will be used: " + proxy);
+            logger.debug("built-in proxy will be used: {}", proxy);
             cmds.add("--proxy");
             cmds.add(proxy);
-        }*/
+        }
 
         if (!extraHeartbeats.isEmpty()) {
             cmds.add("--extra-heartbeats");
         }
 
         return cmds.toArray(new String[0]);
-    }
-
-    @Override
-    public void onDisable(PluginContext context) {
-
     }
 
     private static Path getWakatimeLocation() {

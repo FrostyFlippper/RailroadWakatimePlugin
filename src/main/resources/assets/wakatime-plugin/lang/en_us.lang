@@ -1,0 +1,11 @@
+settings.tree.plugins.wakatime=Wakatime Settings
+wakatime.category.title=Wakatime
+
+wakatime.proxy.title=Proxy
+wakatime.proxy.description=Optional proxy configuration. Supports HTTPS SOCKS and NTLM proxies. For example: 'https://user:pass@host:port' or 'socks5://user:pass@host:port' or 'domain\\user:pass'.
+
+wakatime.does_show_in_status_bar.title=Show In Status Bar
+wakatime.does_show_in_status_bar.description=Whether the time spent programming shows in the status bar or not.
+
+wakatime.is_debug.title=Debug
+wakatime.is_debug.description=Turns on debug messages in log file.
