@@ -32,7 +32,7 @@ dependencies {
     // Railroad Plugin API - essential for all Railroad plugins
     // Replace 'x.y.z' with the actual version of the Railroad Plugin API you are targeting
     // A list of available versions can be found at https://maven.railroadide.dev/#/releases/dev/railroadide/RailroadPluginAPI
-    compileOnly 'dev.railroadide:RailroadPluginAPI:1.0.2'
+    compileOnly 'dev.railroadide:RailroadPluginAPI:1.0.3'
 
     // JavaFX dependencies (if using JavaFX for UI)
     implementation 'org.openjfx:javafx-controls'

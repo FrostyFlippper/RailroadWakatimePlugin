@@ -15,6 +15,8 @@ import dev.railroadide.railroadpluginapi.dto.Document;
 import dev.railroadide.railroadpluginapi.events.FileEvent;
 import dev.railroadide.railroadpluginapi.events.FileModifiedEvent;
 import dev.railroadide.railroadpluginapi.services.ApplicationInfoService;
+import dev.railroadide.railroadpluginapi.services.DocumentEditorStateService;
+import dev.railroadide.railroadpluginapi.services.IDEStateService;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -55,6 +57,7 @@ public class WakatimePlugin implements Plugin {
         logger = context.getLogger();
 
         Registry<Setting<?>> settingRegistry = Registries.getSettingsRegistry(context);
+
         proxySetting = Setting.builder(String.class, "wakatime:proxy")
                 .treePath("plugins.wakatime")
                 .title("wakatime.proxy.title")
@@ -97,7 +100,6 @@ public class WakatimePlugin implements Plugin {
         settingRegistry.register(isDebugSetting.getId(), isDebugSetting);
         context.getLogger().info("Setting '" + isDebugSetting.getId() + "' registered.");
 
-
         Path wakatimeLocation = getWakatimeLocation();
         logger.debug("Wakatime location set to " + wakatimeLocation.toString());
 
@@ -117,14 +119,10 @@ public class WakatimePlugin implements Plugin {
         logger.debug("Wakatime CLI latest version: {}", latestVersion);
 
         String osName = osname();
-        logger.debug("OS name: {}", osName);
-
         String architecture = architecture();
-        logger.debug("Architecture: {}", architecture);
-
-        // TODO: filePath might be null
         Path filePath = downloadWakatimeCLI(latestVersion, osName, architecture, wakatimeLocation);
-        logger.debug("File path: {}", filePath);
+        if(filePath == null)
+            return;
 
         try {
             FileUtil.unzipFile(filePath, wakatimeLocation);
@@ -138,11 +136,14 @@ public class WakatimePlugin implements Plugin {
             wakatimeLocation.resolve("wakatime-cli-%s-%s".formatted(osName, architecture)).toFile().setExecutable(true);
         }
 
+        DocumentEditorStateService editorStateService = context.getService(DocumentEditorStateService.class);
+        ApplicationInfoService applicationInfoService = context.getService(ApplicationInfoService.class);
+        IDEStateService ideStateService = context.getService(IDEStateService.class);
+
         Queue<Heartbeat> heartbeatQueue = new ConcurrentLinkedQueue<>();
-        addEventListeners(context, heartbeatQueue);
+        addEventListeners(context, editorStateService, ideStateService, heartbeatQueue);
 
         String pluginVersion = context.getDescriptor().getVersion();
-        ApplicationInfoService applicationInfoService = context.getService(ApplicationInfoService.class);
         SCHEDULER.scheduleAtFixedRate(() -> runHeartbeatQueue(heartbeatQueue, applicationInfoService, pluginVersion), 0, 30, TimeUnit.SECONDS);
     }
 
@@ -169,42 +170,45 @@ public class WakatimePlugin implements Plugin {
         }
     }
 
-    public void addEventListeners(PluginContext context, Queue<Heartbeat> heartbeatQueue) {
+    public void addEventListeners(PluginContext context, DocumentEditorStateService editorStateService, IDEStateService ideStateService, Queue<Heartbeat> heartbeatQueue) {
         context.getEventBus().subscribe(FileEvent.class, event -> {
-            if (event.isActivated()) {
+            if (event.isActivatedEvent()) {
                 Document file = event.file();
                 logger.debug("File {} activated", file.getPath().toString());
 
                 heartbeatQueue.add(new Heartbeat.Builder()
                         .setEntity(file.getPath().toString())
                         .setLineCount((int) file.getContentAsString().lines().count())
-                        // TODO: requires railroad implementation
-                        //.setLineNumber()
-                        //.setCursorPosition()
+                        .setLineNumber(editorStateService.getCursors().getLast().line())
+                        .setCursorPosition(editorStateService.getCursors().getLast().column())
                         .setTimestamp(getCurrentTimestamp())
-                        .setWrite(true)
-                        // TODO: requires railroad implementation
-                        .setUnsavedFile(false)
-                        //.setProject()
-                        //.setLanguage()
+                        .setWrite(false)
+                        .setUnsavedFile(file.isDirty())
+                        .setProject(ideStateService.getCurrentProject().getAlias())
+                        .setLanguage(file.getLanguageId())
                         .setBuilding(false)
                         .build());
-            } else if (event.isSaved()) {
+
+                logger.debug("Added file is activated heartbeat to queue:" +
+                        "setUnsavedFile: " + file.isDirty());
+
+            } else if (event.isSavedEvent()) {
                 Document file = event.file();
                 heartbeatQueue.add(new Heartbeat.Builder()
                         .setEntity(file.getPath().toString())
                         .setLineCount((int) file.getContentAsString().lines().count())
-                        // TODO: requires railroad implementation
-                        //.setLineNumber()
-                        //.setCursorPosition()
+                        .setLineNumber(editorStateService.getCursors().getLast().line())
+                        .setCursorPosition(editorStateService.getCursors().getLast().column())
                         .setTimestamp(getCurrentTimestamp())
                         .setWrite(true)
-                        // TODO: requires railroad implementation
-                        .setUnsavedFile(true)
-                        //.setProject()
-                        //.setLanguage()
+                        .setUnsavedFile(false)
+                        .setProject(ideStateService.getCurrentProject().getAlias())
+                        .setLanguage(file.getLanguageId())
                         .setBuilding(false)
                         .build());
+
+                logger.debug("Added file saved heartbeat to queue:" +
+                        "setUnsavedFile: " + file.isDirty());
             }
         });
 
@@ -213,17 +217,18 @@ public class WakatimePlugin implements Plugin {
             heartbeatQueue.add(new Heartbeat.Builder()
                     .setEntity(file.getPath().toString())
                     .setLineCount((int) file.getContentAsString().lines().count())
-                    // TODO: requires railroad implementation
-                    //.setLineNumber()
-                    //.setCursorPosition()
+                    .setLineNumber(editorStateService.getCursors().getLast().line() + 1)
+                    .setCursorPosition(editorStateService.getCursors().getLast().column())
                     .setTimestamp(getCurrentTimestamp())
                     .setWrite(true)
-                    // TODO: requires railroad implementation
-                    .setUnsavedFile(false)
-                    //.setProject()
-                    //.setLanguage()
+                    .setUnsavedFile(file.isDirty())
+                    .setProject(ideStateService.getCurrentProject().getAlias())
+                    .setLanguage(file.getLanguageId())
                     .setBuilding(false)
                     .build());
+
+            logger.debug("Added file modified heartbeat to queue:" +
+                    "setUnsavedFile: " + file.isDirty());
         });
     }
 
