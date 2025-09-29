@@ -1,6 +1,18 @@
 settings.tree.plugins.wakatime=Wakatime Settings
 wakatime.category.title=Wakatime
 
+wakatime.apiKey.title=API Key
+wakatime.apiKey.description=A place to enter your api key
+
+wakatime.popup.info.title=API Key
+wakatime.dialog.info.content=Enter your wakatime API key below:
+wakatime.dialog.info.textfieldprompt=waka_...
+wakatime.dialog.popupconfirmation=OK
+wakatime.dialog.info.header=Please enter your WakaTime API key below:
+wakatime.dialog.textflow.click=Click
+wakatime.dialog.textflow.here=HERE
+wakatime.dialog.textflow.togetyourapikey=to get your api key.
+
 wakatime.proxy.title=Proxy
 wakatime.proxy.description=Optional proxy configuration. Supports HTTPS SOCKS and NTLM proxies. For example: 'https://user:pass@host:port' or 'socks5://user:pass@host:port' or 'domain\\user:pass'.
 

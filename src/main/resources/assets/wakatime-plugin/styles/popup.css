@@ -1,0 +1,7 @@
+.text-flow-text {
+    -fx-fill: -color-fg-muted;
+}
+
+.text-hyperlink {
+    -fx-font-weight: bold;
+}

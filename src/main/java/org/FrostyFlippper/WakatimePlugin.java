@@ -2,11 +2,19 @@ package org.FrostyFlippper;
 
 import com.google.gson.*;
 import dev.railroadide.core.gson.GsonLocator;
+import dev.railroadide.core.localization.LocalizationService;
+import dev.railroadide.core.localization.LocalizationServiceLocator;
 import dev.railroadide.core.registry.Registry;
 import dev.railroadide.core.secure_storage.SecureTokenStore;
 import dev.railroadide.core.settings.DefaultSettingCodecs;
 import dev.railroadide.core.settings.Setting;
 import dev.railroadide.core.settings.SettingCategory;
+import dev.railroadide.core.settings.SettingCodec;
+import dev.railroadide.core.ui.RRDialogPane;
+import dev.railroadide.core.ui.localized.LocalizedButton;
+import dev.railroadide.core.ui.localized.LocalizedLabel;
+import dev.railroadide.core.ui.localized.LocalizedText;
+import dev.railroadide.core.ui.localized.LocalizedTextField;
 import dev.railroadide.logger.Logger;
 import dev.railroadide.railroadpluginapi.Plugin;
 import dev.railroadide.railroadpluginapi.PluginContext;
@@ -17,6 +25,17 @@ import dev.railroadide.railroadpluginapi.events.FileModifiedEvent;
 import dev.railroadide.railroadpluginapi.services.ApplicationInfoService;
 import dev.railroadide.railroadpluginapi.services.DocumentEditorStateService;
 import dev.railroadide.railroadpluginapi.services.IDEStateService;
+import javafx.application.HostServices;
+import javafx.application.Platform;
+import javafx.geometry.Insets;
+import javafx.scene.Node;
+import javafx.scene.Scene;
+import javafx.scene.control.*;
+import javafx.scene.layout.VBox;
+import javafx.scene.text.Text;
+import javafx.scene.text.TextFlow;
+import javafx.stage.PopupWindow;
+import javafx.stage.Stage;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -36,27 +55,48 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Queue;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 public class WakatimePlugin implements Plugin {
     private static final Gson GSON = GsonLocator.getInstance();
     private static Logger logger;
 
-    private static final SecureTokenStore TOKEN_STORE = new SecureTokenStore("WakatimePlugin");
-    private static final ScheduledExecutorService SCHEDULER = Executors.newScheduledThreadPool(1);
+    public static final SecureTokenStore TOKEN_STORE = new SecureTokenStore("WakatimePlugin");
+    private static ScheduledExecutorService SCHEDULER = Executors.newScheduledThreadPool(1);
 
+    private Setting<String> apiKeySetting;
     private Setting<String> proxySetting;
     private Setting<Boolean> doesShowInStatusBarSetting;
     private Setting<Boolean> isDebugSetting;
+
+    public static final SettingCodec<String, TextField> API_KEY_CODEC =
+            SettingCodec.<String, TextField>builder("wakatime:api_key")
+                    .nodeToValue(textField -> {
+                        TOKEN_STORE.saveToken(textField.getText(), "WakatimeApiKey");
+                        return textField.getText();
+                    })
+                    .valueToNode((text, textF) -> textF.setText(text))
+                    .jsonEncoder(string -> JsonNull.INSTANCE)
+                    .jsonDecoder(jsonElement -> "")
+                    .createNode(string -> new TextField())
+                    .build();
 
     @Override
     public void onEnable(PluginContext context) {
         logger = context.getLogger();
 
         Registry<Setting<?>> settingRegistry = Registries.getSettingsRegistry(context);
+
+        apiKeySetting = Setting.builder(String.class, "wakatime:apiKeySetting")
+                .treePath("plugins.wakatime")
+                .title("wakatime.apiKey.title")
+                .description("wakatime.apiKey.description")
+                .codec(API_KEY_CODEC)
+                .category(SettingCategory.builder("wakatime:category")
+                        .title("wakatime.category.title")
+                        .noDescription().build())
+                .defaultValue("")
+                .build();
 
         proxySetting = Setting.builder(String.class, "wakatime:proxy")
                 .treePath("plugins.wakatime")
@@ -91,6 +131,9 @@ public class WakatimePlugin implements Plugin {
                 .defaultValue(false)
                 .build();
 
+        settingRegistry.register(apiKeySetting.getId(), apiKeySetting);
+        context.getLogger().info("Setting '" + apiKeySetting.getId() + "' registered.");
+
         settingRegistry.register(proxySetting.getId(), proxySetting);
         context.getLogger().info("Setting '" + proxySetting.getId() + "' registered.");
 
@@ -121,7 +164,7 @@ public class WakatimePlugin implements Plugin {
         String osName = osname();
         String architecture = architecture();
         Path filePath = downloadWakatimeCLI(latestVersion, osName, architecture, wakatimeLocation);
-        if(filePath == null)
+        if (filePath == null)
             return;
 
         try {
@@ -144,13 +187,83 @@ public class WakatimePlugin implements Plugin {
         addEventListeners(context, editorStateService, ideStateService, heartbeatQueue);
 
         String pluginVersion = context.getDescriptor().getVersion();
-        SCHEDULER.scheduleAtFixedRate(() -> runHeartbeatQueue(heartbeatQueue, applicationInfoService, pluginVersion), 0, 30, TimeUnit.SECONDS);
+
+        SCHEDULER = Executors.newScheduledThreadPool(1);
+
+        try{
+            if(TOKEN_STORE.getToken("WakatimeApiKey").isEmpty()){
+                displayPopup(context);
+            }
+        } catch (RuntimeException  e) {
+            displayPopup(context);
+        }
+
+        SCHEDULER.scheduleAtFixedRate(() -> runHeartbeatQueue(heartbeatQueue, applicationInfoService, pluginVersion, TOKEN_STORE.getToken("WakatimeApiKey")), 0, 30, TimeUnit.SECONDS);
+    }
+
+    private void displayPopup(PluginContext context){
+        SCHEDULER.schedule(() -> {
+            Platform.runLater(() -> {
+                LocalizationService localizationService = LocalizationServiceLocator.getInstance();
+
+                LocalizedLabel label = new LocalizedLabel("wakatime.dialog.info.content");
+                LocalizedTextField apiKeyField = new LocalizedTextField("wakatime.dialog.info.textfieldprompt");
+                var localizedButton = new LocalizedButton("wakatime.dialog.popupconfirmation");
+
+                var hyperlink = new Hyperlink(localizationService.get("wakatime.dialog.textflow.here"));
+
+                HostServices hostServices = context.getService(HostServices.class);
+                hyperlink.setOnAction(e -> hostServices.showDocument("https://wakatime.com/api-key"));
+
+                var textFlow = new TextFlow(new LocalizedText("wakatime.dialog.textflow.click"),
+                        new Text(" "),
+                        hyperlink,
+                        new Text(" "),
+                        new LocalizedText("wakatime.dialog.textflow.togetyourapikey"));
+
+                textFlow.getChildren().forEach(node -> {
+                    if (node instanceof Text text) {
+                        text.getStyleClass().add("text-flow-text");
+                    }
+                    if(node instanceof Hyperlink link) {
+                        link.getStyleClass().add("text-hyperlink");
+                    }
+                });
+
+                VBox vBox = new VBox(label, apiKeyField, localizedButton, textFlow);
+                vBox.setPadding(new Insets(10));
+                vBox.setSpacing(10);
+
+                Scene scene = new Scene(vBox);
+
+                scene.getStylesheets().add(getClass().getResource("/assets/wakatime-plugin/styles/popup.css").toExternalForm());
+
+                Stage stage = new Stage();
+                stage.setTitle(localizationService.get("wakatime.popup.info.title"));
+                stage.setScene(scene);
+
+                localizedButton.setOnAction(event -> {
+                    if(apiKeyField.getText().isEmpty()){
+                        return;
+                    }
+                    TOKEN_STORE.saveToken(apiKeyField.getText(), "WakatimeApiKey");
+                    stage.close();
+                });
+
+                stage.showAndWait();
+            });
+        }, 1, TimeUnit.SECONDS);
     }
 
     @Override
     public void onDisable(PluginContext context) {
         Registry<Setting<?>> settingRegistry = Registries.getSettingsRegistry(context);
         try {
+            if (apiKeySetting != null) {
+                settingRegistry.unregister(apiKeySetting.getId());
+                context.getLogger().info("Setting '" + apiKeySetting.getId() + "' unregistered.");
+            }
+
             if (proxySetting != null) {
                 settingRegistry.unregister(proxySetting.getId());
                 context.getLogger().info("Setting '" + proxySetting.getId() + "' unregistered.");
@@ -236,8 +349,16 @@ public class WakatimePlugin implements Plugin {
         return new BigDecimal((System.currentTimeMillis() / 1000.0)).setScale(4, RoundingMode.HALF_UP);
     }
 
-    public void runHeartbeatQueue(Queue<Heartbeat> heartbeatQueue, ApplicationInfoService applicationInfoService, String currentVersion) {
-        String retrievedApiKey = TOKEN_STORE.getToken("WakatimeApiKey");
+    public void runHeartbeatQueue(Queue<Heartbeat> heartbeatQueue, ApplicationInfoService applicationInfoService, String currentVersion, String apiKey) {
+        String retrievedApiKey;
+        try {
+            retrievedApiKey = TOKEN_STORE.getToken("WakatimeApiKey");
+        } catch (IllegalArgumentException e) {
+            logger.warn("null api key");
+            return;
+        } catch (RuntimeException e) {
+            throw new RuntimeException(e);
+        }
 
         Heartbeat initialHeartbeat = heartbeatQueue.poll();
         if (initialHeartbeat == null)
@@ -339,7 +460,7 @@ public class WakatimePlugin implements Plugin {
             cmds.add("building");
         }
 
-        if(Boolean.TRUE.equals(isDebugSetting.getValue())){
+        if (Boolean.TRUE.equals(isDebugSetting.getValue())) {
             cmds.add("--verbose");
         }
 
