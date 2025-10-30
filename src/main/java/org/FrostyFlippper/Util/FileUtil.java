@@ -1,4 +1,6 @@
-package org.FrostyFlippper;
+package org.FrostyFlippper.Util;
+
+import org.FrostyFlippper.WakatimePlugin;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -23,12 +25,12 @@ public class FileUtil {
                 if (zipEntry.isDirectory()) {
                     Files.createDirectories(newFile);
                     if (!Files.isDirectory(newFile))
-                        throw new IOException("Failed to create directory " + newFile);
+                        WakatimePlugin.getLogger().error("Failed to create directory {}", newFile);
                 } else {
                     Path parent = newFile.getParent();
                     Files.createDirectories(parent);
                     if (!Files.isDirectory(parent))
-                        throw new IOException("Failed to create directory " + parent);
+                        WakatimePlugin.getLogger().error("Failed to create directory {}", newFile);
 
                     Files.copy(zipInputStream, newFile, StandardCopyOption.REPLACE_EXISTING);
                 }
@@ -44,13 +46,12 @@ public class FileUtil {
      * @param destinationDir the destination directory
      * @param zipEntry       the ZIP entry to resolve
      * @return the resolved path for the ZIP entry
-     * @throws IOException if the resolved path is outside the destination directory
      */
-    public static Path resolveZipEntryPath(Path destinationDir, ZipEntry zipEntry) throws IOException {
+    public static Path resolveZipEntryPath(Path destinationDir, ZipEntry zipEntry) {
         var destFile = Path.of(destinationDir.toString(), zipEntry.getName());
 
         if (!destFile.normalize().startsWith(destinationDir))
-            throw new IOException("Bad zip entry: " + zipEntry.getName());
+            WakatimePlugin.getLogger().error("Bad zip entry:  {}", zipEntry.getName());
 
         return destFile;
     }

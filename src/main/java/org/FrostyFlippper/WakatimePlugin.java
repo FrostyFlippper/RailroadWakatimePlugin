@@ -6,11 +6,7 @@ import dev.railroadide.core.localization.LocalizationService;
 import dev.railroadide.core.localization.LocalizationServiceLocator;
 import dev.railroadide.core.registry.Registry;
 import dev.railroadide.core.secure_storage.SecureTokenStore;
-import dev.railroadide.core.settings.DefaultSettingCodecs;
 import dev.railroadide.core.settings.Setting;
-import dev.railroadide.core.settings.SettingCategory;
-import dev.railroadide.core.settings.SettingCodec;
-import dev.railroadide.core.ui.RRDialogPane;
 import dev.railroadide.core.ui.localized.LocalizedButton;
 import dev.railroadide.core.ui.localized.LocalizedLabel;
 import dev.railroadide.core.ui.localized.LocalizedText;
@@ -20,140 +16,72 @@ import dev.railroadide.railroadpluginapi.Plugin;
 import dev.railroadide.railroadpluginapi.PluginContext;
 import dev.railroadide.railroadpluginapi.Registries;
 import dev.railroadide.railroadpluginapi.dto.Document;
+import dev.railroadide.railroadpluginapi.event.EventBus;
 import dev.railroadide.railroadpluginapi.events.FileEvent;
 import dev.railroadide.railroadpluginapi.events.FileModifiedEvent;
+import dev.railroadide.railroadpluginapi.events.ProjectEvent;
 import dev.railroadide.railroadpluginapi.services.ApplicationInfoService;
 import dev.railroadide.railroadpluginapi.services.DocumentEditorStateService;
 import dev.railroadide.railroadpluginapi.services.IDEStateService;
 import javafx.application.HostServices;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
-import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.VBox;
 import javafx.scene.text.Text;
 import javafx.scene.text.TextFlow;
-import javafx.stage.PopupWindow;
 import javafx.stage.Stage;
+import lombok.Getter;
+import org.FrostyFlippper.Util.FileUtil;
+import org.FrostyFlippper.Util.PlatformUtil;
+import org.FrostyFlippper.Util.SettingUtil;
+import org.FrostyFlippper.Util.WakatimeUtil;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.*;
 
 public class WakatimePlugin implements Plugin {
-    private static final Gson GSON = GsonLocator.getInstance();
+    public static final Gson GSON = GsonLocator.getInstance();
+
+    @Getter
     private static Logger logger;
 
     public static final SecureTokenStore TOKEN_STORE = new SecureTokenStore("WakatimePlugin");
-    private static ScheduledExecutorService SCHEDULER = Executors.newScheduledThreadPool(1);
-
-    private Setting<String> apiKeySetting;
-    private Setting<String> proxySetting;
-    private Setting<Boolean> doesShowInStatusBarSetting;
-    private Setting<Boolean> isDebugSetting;
-
-    public static final SettingCodec<String, TextField> API_KEY_CODEC =
-            SettingCodec.<String, TextField>builder("wakatime:api_key")
-                    .nodeToValue(textField -> {
-                        TOKEN_STORE.saveToken(textField.getText(), "WakatimeApiKey");
-                        return textField.getText();
-                    })
-                    .valueToNode((text, textF) -> textF.setText(text))
-                    .jsonEncoder(string -> JsonNull.INSTANCE)
-                    .jsonDecoder(jsonElement -> "")
-                    .createNode(string -> new TextField())
-                    .build();
+    private static final ScheduledExecutorService SCHEDULER = Executors.newScheduledThreadPool(1);
 
     @Override
     public void onEnable(PluginContext context) {
         logger = context.getLogger();
 
+        String latestVersion = WakatimeUtil.getLatestWakatimeVersion();
+        String architecture = PlatformUtil.architecture();
+        String osName = PlatformUtil.osname();
+
         Registry<Setting<?>> settingRegistry = Registries.getSettingsRegistry(context);
 
-        apiKeySetting = Setting.builder(String.class, "wakatime:apiKeySetting")
-                .treePath("plugins.wakatime")
-                .title("wakatime.apiKey.title")
-                .description("wakatime.apiKey.description")
-                .codec(API_KEY_CODEC)
-                .category(SettingCategory.builder("wakatime:category")
-                        .title("wakatime.category.title")
-                        .noDescription().build())
-                .defaultValue("")
-                .build();
+        SettingUtil.buildSettings();
+        SettingUtil.registerSettings(settingRegistry, context);
 
-        proxySetting = Setting.builder(String.class, "wakatime:proxy")
-                .treePath("plugins.wakatime")
-                .title("wakatime.proxy.title")
-                .description("wakatime.proxy.description")
-                .codec(DefaultSettingCodecs.STRING)
-                .category(SettingCategory.builder("wakatime:category")
-                        .title("wakatime.category.title")
-                        .noDescription().build())
-                .defaultValue("")
-                .build();
-
-        doesShowInStatusBarSetting = Setting.builder(Boolean.class, "wakatime:does_show_in_status_bar")
-                .treePath("plugins.wakatime")
-                .title("wakatime.does_show_in_status_bar.title")
-                .description("wakatime.does_show_in_status_bar.description")
-                .codec(DefaultSettingCodecs.BOOLEAN)
-                .category(SettingCategory.builder("wakatime:category")
-                        .title("wakatime.category.title")
-                        .noDescription().build())
-                .defaultValue(true)
-                .build();
-
-        isDebugSetting = Setting.builder(Boolean.class, "wakatime:is_debug")
-                .treePath("plugins.wakatime")
-                .title("wakatime.is_debug.title")
-                .description("wakatime.is_debug.description")
-                .codec(DefaultSettingCodecs.BOOLEAN)
-                .category(SettingCategory.builder("wakatime:category")
-                        .title("wakatime.category.title")
-                        .noDescription().build())
-                .defaultValue(false)
-                .build();
-
-        settingRegistry.register(apiKeySetting.getId(), apiKeySetting);
-        context.getLogger().info("Setting '" + apiKeySetting.getId() + "' registered.");
-
-        settingRegistry.register(proxySetting.getId(), proxySetting);
-        context.getLogger().info("Setting '" + proxySetting.getId() + "' registered.");
-
-        settingRegistry.register(doesShowInStatusBarSetting.getId(), doesShowInStatusBarSetting);
-        context.getLogger().info("Setting '" + doesShowInStatusBarSetting.getId() + "' registered.");
-
-        settingRegistry.register(isDebugSetting.getId(), isDebugSetting);
-        context.getLogger().info("Setting '" + isDebugSetting.getId() + "' registered.");
-
-        Path wakatimeLocation = getWakatimeLocation();
-        logger.debug("Wakatime location set to " + wakatimeLocation.toString());
+        Path wakatimeLocation = WakatimeUtil.getWakatimeLocation();
+        logger.debug("Wakatime location set to {}", wakatimeLocation.toString());
 
         try {
-            checkMissingPlatformSupport();
+            PlatformUtil.checkMissingPlatformSupport();
         } catch (RuntimeException exception) {
-            logger.error("Unsupported platform: {}-{}. Please check the Wakatime documentation for supported platforms.", osname(), architecture(), exception);
+            logger.error("Unsupported platform: {}-{}. Please check the Wakatime documentation for supported platforms.", osName, architecture, exception);
             return;
         }
 
-        String latestVersion = getLatestWakatimeVersion();
         if (latestVersion == null) {
             logger.error("Unable to get the latest Wakatime version!");
             return;
@@ -161,9 +89,7 @@ public class WakatimePlugin implements Plugin {
 
         logger.debug("Wakatime CLI latest version: {}", latestVersion);
 
-        String osName = osname();
-        String architecture = architecture();
-        Path filePath = downloadWakatimeCLI(latestVersion, osName, architecture, wakatimeLocation);
+        Path filePath = WakatimeUtil.downloadWakatimeCLI(latestVersion, osName, architecture, wakatimeLocation);
         if (filePath == null)
             return;
 
@@ -175,8 +101,11 @@ public class WakatimePlugin implements Plugin {
             return;
         }
 
-        if (!isWindows()) {
-            wakatimeLocation.resolve("wakatime-cli-%s-%s".formatted(osName, architecture)).toFile().setExecutable(true);
+        if (!PlatformUtil.isWindows()) {
+            if(!wakatimeLocation.resolve("wakatime-cli-%s-%s".formatted(osName, architecture)).toFile().setExecutable(true)){
+                logger.error("Wakatime file at {} could not be executed!", WakatimeUtil.getWakatimeLocation());
+                return;
+            }
         }
 
         DocumentEditorStateService editorStateService = context.getService(DocumentEditorStateService.class);
@@ -184,181 +113,189 @@ public class WakatimePlugin implements Plugin {
         IDEStateService ideStateService = context.getService(IDEStateService.class);
 
         Queue<Heartbeat> heartbeatQueue = new ConcurrentLinkedQueue<>();
-        addEventListeners(context, editorStateService, ideStateService, heartbeatQueue);
 
         String pluginVersion = context.getDescriptor().getVersion();
 
-        SCHEDULER = Executors.newScheduledThreadPool(1);
+        EventBus eventBus = context.getEventBus();
+        eventBus.subscribe(ProjectEvent.class,
+                event -> handleProjectStateChange(context, event, heartbeatQueue, applicationInfoService, pluginVersion));
+        eventBus.subscribe(FileEvent.class, event -> {
+            if (event.isActivatedEvent()) {
+                handleFileActivated(editorStateService, ideStateService, heartbeatQueue, event);
 
-        try{
-            if(TOKEN_STORE.getToken("WakatimeApiKey").isEmpty()){
-                displayPopup(context);
+            } else if (event.isSavedEvent()) {
+                handleFileSaved(editorStateService, ideStateService, heartbeatQueue, event);
             }
-        } catch (RuntimeException  e) {
-            displayPopup(context);
+        });
+
+        eventBus.subscribe(FileModifiedEvent.class,
+                event -> handleFileModified(event, editorStateService, ideStateService, heartbeatQueue));
+    }
+
+    private void handleProjectStateChange(PluginContext context, ProjectEvent event, Queue<Heartbeat> heartbeatQueue, ApplicationInfoService applicationInfoService, String pluginVersion) {
+        if (event.isOpened()) {
+            while(true) {
+                try {
+                    if(TOKEN_STORE.getToken("WakatimeApiKey").isEmpty()) {
+                        displayPopup(context);
+                    } else {
+                        break;
+                    }
+                } catch (RuntimeException ignored) {
+                    displayPopup(context);
+                }
+            }
+
+            SCHEDULER.scheduleAtFixedRate(
+                    () -> runHeartbeatQueue(heartbeatQueue, applicationInfoService, pluginVersion), 0, 30, TimeUnit.SECONDS);
         }
 
-        SCHEDULER.scheduleAtFixedRate(() -> runHeartbeatQueue(heartbeatQueue, applicationInfoService, pluginVersion, TOKEN_STORE.getToken("WakatimeApiKey")), 0, 30, TimeUnit.SECONDS);
+        if(event.isClosed()) {
+            try {
+                if(!SCHEDULER.awaitTermination(5, TimeUnit.SECONDS)){
+                    SCHEDULER.shutdownNow();
+                }
+            } catch (InterruptedException ignored) {
+                SCHEDULER.shutdownNow();
+            }
+        }
     }
 
     private void displayPopup(PluginContext context){
-        SCHEDULER.schedule(() -> {
-            Platform.runLater(() -> {
-                LocalizationService localizationService = LocalizationServiceLocator.getInstance();
+        SCHEDULER.schedule(() -> Platform.runLater(() -> {
+            LocalizationService localizationService = LocalizationServiceLocator.getInstance();
 
-                LocalizedLabel label = new LocalizedLabel("wakatime.dialog.info.content");
-                LocalizedTextField apiKeyField = new LocalizedTextField("wakatime.dialog.info.textfieldprompt");
-                var localizedButton = new LocalizedButton("wakatime.dialog.popupconfirmation");
+            var label = new LocalizedLabel("wakatime.dialog.info.content");
+            var apiKeyField = new LocalizedTextField("wakatime.dialog.info.textfieldprompt");
+            var localizedButton = new LocalizedButton("wakatime.dialog.popupconfirmation");
 
-                var hyperlink = new Hyperlink(localizationService.get("wakatime.dialog.textflow.here"));
+            var hyperlink = new Hyperlink(localizationService.get("wakatime.dialog.textflow.here"));
 
-                HostServices hostServices = context.getService(HostServices.class);
-                hyperlink.setOnAction(e -> hostServices.showDocument("https://wakatime.com/api-key"));
+            HostServices hostServices = context.getService(HostServices.class);
+            hyperlink.setOnAction($ -> hostServices.showDocument("https://wakatime.com/api-key"));
 
-                var textFlow = new TextFlow(new LocalizedText("wakatime.dialog.textflow.click"),
-                        new Text(" "),
-                        hyperlink,
-                        new Text(" "),
-                        new LocalizedText("wakatime.dialog.textflow.togetyourapikey"));
+            var textFlow = new TextFlow(new LocalizedText("wakatime.dialog.textflow.click"),
+                    new Text(" "),
+                    hyperlink,
+                    new Text(" "),
+                    new LocalizedText("wakatime.dialog.textflow.togetyourapikey"));
 
-                textFlow.getChildren().forEach(node -> {
-                    if (node instanceof Text text) {
-                        text.getStyleClass().add("text-flow-text");
-                    }
-                    if(node instanceof Hyperlink link) {
-                        link.getStyleClass().add("text-hyperlink");
-                    }
-                });
+            textFlow.getChildren().forEach(node -> {
+                if (node instanceof Text text) {
+                    text.getStyleClass().add("text-flow-text");
+                }
 
-                VBox vBox = new VBox(label, apiKeyField, localizedButton, textFlow);
-                vBox.setPadding(new Insets(10));
-                vBox.setSpacing(10);
-
-                Scene scene = new Scene(vBox);
-
-                scene.getStylesheets().add(getClass().getResource("/assets/wakatime-plugin/styles/popup.css").toExternalForm());
-
-                Stage stage = new Stage();
-                stage.setTitle(localizationService.get("wakatime.popup.info.title"));
-                stage.setScene(scene);
-
-                localizedButton.setOnAction(event -> {
-                    if(apiKeyField.getText().isEmpty()){
-                        return;
-                    }
-                    TOKEN_STORE.saveToken(apiKeyField.getText(), "WakatimeApiKey");
-                    stage.close();
-                });
-
-                stage.showAndWait();
+                if(node instanceof Hyperlink link) {
+                    link.getStyleClass().add("text-hyperlink");
+                }
             });
-        }, 1, TimeUnit.SECONDS);
+
+            var vBox = new VBox(label, apiKeyField, localizedButton, textFlow);
+            vBox.setPadding(new Insets(10));
+            vBox.setSpacing(10);
+
+            var scene = new Scene(vBox);
+
+            scene.getStylesheets().add(getClass().getResource("/assets/wakatime-plugin/styles/popup.css").toExternalForm());
+
+            var stage = new Stage();
+            stage.setTitle(localizationService.get("wakatime.popup.info.title"));
+            stage.setScene(scene);
+
+            localizedButton.setOnAction(event -> {
+                if(apiKeyField.getText().isEmpty())
+                    return;
+
+                TOKEN_STORE.saveToken(apiKeyField.getText(), "WakatimeApiKey");
+                stage.close();
+            });
+
+            stage.showAndWait();
+        }), 1, TimeUnit.SECONDS);
     }
 
     @Override
     public void onDisable(PluginContext context) {
-        Registry<Setting<?>> settingRegistry = Registries.getSettingsRegistry(context);
-        try {
-            if (apiKeySetting != null) {
-                settingRegistry.unregister(apiKeySetting.getId());
-                context.getLogger().info("Setting '" + apiKeySetting.getId() + "' unregistered.");
-            }
-
-            if (proxySetting != null) {
-                settingRegistry.unregister(proxySetting.getId());
-                context.getLogger().info("Setting '" + proxySetting.getId() + "' unregistered.");
-            }
-
-            if (doesShowInStatusBarSetting != null) {
-                settingRegistry.unregister(doesShowInStatusBarSetting.getId());
-                context.getLogger().info("Setting '" + doesShowInStatusBarSetting.getId() + "' unregistered.");
-            }
-
-            if (isDebugSetting != null) {
-                settingRegistry.unregister(isDebugSetting.getId());
-                context.getLogger().info("Setting '" + isDebugSetting.getId() + "' unregistered.");
-            }
-        } catch (Exception exception) {
-            context.getLogger().warn("Failed to unregister setting", exception);
-        }
+        SettingUtil.unregisterSettings(context);
     }
 
-    public void addEventListeners(PluginContext context, DocumentEditorStateService editorStateService, IDEStateService ideStateService, Queue<Heartbeat> heartbeatQueue) {
-        context.getEventBus().subscribe(FileEvent.class, event -> {
-            if (event.isActivatedEvent()) {
-                Document file = event.file();
-                logger.debug("File {} activated", file.getPath().toString());
+    private static void handleFileActivated(DocumentEditorStateService editorStateService, IDEStateService ideStateService, Queue<Heartbeat> heartbeatQueue, FileEvent event) {
+        Document file = event.file();
+        logger.debug("File {} activated", file.getPath().toString());
 
-                heartbeatQueue.add(new Heartbeat.Builder()
-                        .setEntity(file.getPath().toString())
-                        .setLineCount((int) file.getContentAsString().lines().count())
-                        .setLineNumber(editorStateService.getCursors().getLast().line())
-                        .setCursorPosition(editorStateService.getCursors().getLast().column())
-                        .setTimestamp(getCurrentTimestamp())
-                        .setWrite(false)
-                        .setUnsavedFile(file.isDirty())
-                        .setProject(ideStateService.getCurrentProject().getAlias())
-                        .setLanguage(file.getLanguageId())
-                        .setBuilding(false)
-                        .build());
+        heartbeatQueue.add(new Heartbeat.Builder()
+                .setEntity(file.getPath().toString())
+                .setLineCount((int) file.getContentAsString().lines().count())
+                .setLineNumber(editorStateService.getCursors().getLast().line())
+                .setCursorPosition(editorStateService.getCursors().getLast().column())
+                .setTimestamp(getCurrentTimestamp())
+                .setWrite(false)
+                .setUnsavedFile(file.isDirty())
+                .setProject(ideStateService.getCurrentProject().getAlias())
+                .setLanguage(file.getLanguageId())
+                .setBuilding(false)
+                .build());
 
-                logger.debug("Added file is activated heartbeat to queue:" +
-                        "setUnsavedFile: " + file.isDirty());
+        logger.debug("Added file is activated heartbeat to the queue:");
+    }
 
-            } else if (event.isSavedEvent()) {
-                Document file = event.file();
-                heartbeatQueue.add(new Heartbeat.Builder()
-                        .setEntity(file.getPath().toString())
-                        .setLineCount((int) file.getContentAsString().lines().count())
-                        .setLineNumber(editorStateService.getCursors().getLast().line())
-                        .setCursorPosition(editorStateService.getCursors().getLast().column())
-                        .setTimestamp(getCurrentTimestamp())
-                        .setWrite(true)
-                        .setUnsavedFile(false)
-                        .setProject(ideStateService.getCurrentProject().getAlias())
-                        .setLanguage(file.getLanguageId())
-                        .setBuilding(false)
-                        .build());
+    private static void handleFileSaved(DocumentEditorStateService editorStateService, IDEStateService ideStateService, Queue<Heartbeat> heartbeatQueue, FileEvent event) {
+        Document file = event.file();
+        heartbeatQueue.add(new Heartbeat.Builder()
+                .setEntity(file.getPath().toString())
+                .setLineCount((int) file.getContentAsString().lines().count())
+                .setLineNumber(editorStateService.getCursors().getLast().line())
+                .setCursorPosition(editorStateService.getCursors().getLast().column())
+                .setTimestamp(getCurrentTimestamp())
+                .setWrite(true)
+                .setUnsavedFile(false)
+                .setProject(ideStateService.getCurrentProject().getAlias())
+                .setLanguage(file.getLanguageId())
+                .setBuilding(false)
+                .build());
 
-                logger.debug("Added file saved heartbeat to queue:" +
-                        "setUnsavedFile: " + file.isDirty());
-            }
-        });
+        logger.debug("Added file saved heartbeat to queue:");
+    }
 
-        context.getEventBus().subscribe(FileModifiedEvent.class, event -> {
-            Document file = event.file();
-            heartbeatQueue.add(new Heartbeat.Builder()
-                    .setEntity(file.getPath().toString())
-                    .setLineCount((int) file.getContentAsString().lines().count())
-                    .setLineNumber(editorStateService.getCursors().getLast().line() + 1)
-                    .setCursorPosition(editorStateService.getCursors().getLast().column())
-                    .setTimestamp(getCurrentTimestamp())
-                    .setWrite(true)
-                    .setUnsavedFile(file.isDirty())
-                    .setProject(ideStateService.getCurrentProject().getAlias())
-                    .setLanguage(file.getLanguageId())
-                    .setBuilding(false)
-                    .build());
+    private static void handleFileModified(FileModifiedEvent event, DocumentEditorStateService editorStateService, IDEStateService ideStateService, Queue<Heartbeat> heartbeatQueue){
+        Document file = event.file();
+        heartbeatQueue.add(new Heartbeat.Builder()
+                .setEntity(file.getPath().toString())
+                .setLineCount((int) file.getContentAsString().lines().count())
+                .setLineNumber(editorStateService.getCursors().getLast().line() + 1)
+                .setCursorPosition(editorStateService.getCursors().getLast().column())
+                .setTimestamp(getCurrentTimestamp())
+                .setWrite(true)
+                .setUnsavedFile(file.isDirty())
+                .setProject(ideStateService.getCurrentProject().getAlias())
+                .setLanguage(file.getLanguageId())
+                .setBuilding(false)
+                .build());
 
-            logger.debug("Added file modified heartbeat to queue:" +
-                    "setUnsavedFile: " + file.isDirty());
-        });
+        logger.debug("Added file modified heartbeat to queue:");
     }
 
     private static BigDecimal getCurrentTimestamp() {
         return new BigDecimal((System.currentTimeMillis() / 1000.0)).setScale(4, RoundingMode.HALF_UP);
     }
 
-    public void runHeartbeatQueue(Queue<Heartbeat> heartbeatQueue, ApplicationInfoService applicationInfoService, String currentVersion, String apiKey) {
-        String retrievedApiKey;
+    private static String getApiKey(){
         try {
-            retrievedApiKey = TOKEN_STORE.getToken("WakatimeApiKey");
-        } catch (IllegalArgumentException e) {
-            logger.warn("null api key");
-            return;
-        } catch (RuntimeException e) {
-            throw new RuntimeException(e);
+            return TOKEN_STORE.getToken("WakatimeApiKey");
+        } catch (IllegalArgumentException exception) {
+            logger.warn("API key is not present!", exception);
+            return null;
+        } catch (RuntimeException exception) {
+            logger.error("An error occurred while retrieving the api key!", exception);
+            return null;
         }
+    }
+
+    public void runHeartbeatQueue(Queue<Heartbeat> heartbeatQueue, ApplicationInfoService applicationInfoService, String currentVersion) {
+        String retrievedApiKey = getApiKey();
+
+        if(retrievedApiKey == null)
+            return;
 
         Heartbeat initialHeartbeat = heartbeatQueue.poll();
         if (initialHeartbeat == null)
@@ -405,10 +342,10 @@ public class WakatimePlugin implements Plugin {
 
     private String[] buildCliCommand(Heartbeat heartbeat, String apiKey, List<Heartbeat> extraHeartbeats, ApplicationInfoService applicationInfoService, String currentVersion) {
         List<String> cmds = new ArrayList<>();
-        cmds.add(getWakatimeCliLocation().toString());
+        cmds.add(WakatimeUtil.getWakatimeCliLocation().toString());
 
         cmds.add("--plugin");
-        String plugin = getPluginString(applicationInfoService, currentVersion);
+        String plugin = WakatimeUtil.getPluginString(applicationInfoService, currentVersion);
         cmds.add(plugin);
 
         cmds.add("--entity");
@@ -447,24 +384,24 @@ public class WakatimePlugin implements Plugin {
             cmds.add(heartbeat.getLanguage());
         }
 
-        if (heartbeat.isWrite()) {
+        if (heartbeat.getIsWrite()) {
             cmds.add("--write");
         }
 
-        if (heartbeat.isUnsavedFile()) {
+        if (heartbeat.getIsUnsavedFile()) {
             cmds.add("--is-unsaved-entity");
         }
 
-        if (heartbeat.isBuilding()) {
+        if (heartbeat.getIsBuilding()) {
             cmds.add("--category");
             cmds.add("building");
         }
 
-        if (Boolean.TRUE.equals(isDebugSetting.getValue())) {
+        if (Boolean.TRUE.equals(SettingUtil.isDebugSetting.getValue())) {
             cmds.add("--verbose");
         }
 
-        String proxy = proxySetting.getValue();
+        String proxy = SettingUtil.proxySetting.getValue();
         if (proxy != null) {
             logger.debug("built-in proxy will be used: {}", proxy);
             cmds.add("--proxy");
@@ -476,136 +413,5 @@ public class WakatimePlugin implements Plugin {
         }
 
         return cmds.toArray(new String[0]);
-    }
-
-    private static Path getWakatimeLocation() {
-        final String wakatimeHome = System.getenv("WAKATIME_HOME");
-        return wakatimeHome == null || wakatimeHome.isBlank() ?
-                Path.of(System.getProperty("user.home")).resolve(".wakatime") :
-                Path.of(wakatimeHome);
-    }
-
-    private static Path getWakatimeCliLocation() {
-        String fileName = "wakatime-cli-%s-%s.exe".formatted(osname(), architecture());
-        Path resolvedPath = getWakatimeLocation().resolve(fileName);
-        logger.debug("Wakatime CLI location set to {}", resolvedPath);
-        return resolvedPath;
-    }
-
-    private static String getPluginString(ApplicationInfoService infoService, String pluginVersion) {
-        return "%s/%s %s-wakatime/%s".formatted(infoService.getName(), infoService.getVersion(), infoService.getName(), pluginVersion);
-    }
-
-    private static String getLatestWakatimeVersion() {
-        try (HttpClient client = HttpClient.newHttpClient()) {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("https://api.github.com/repos/wakatime/wakatime-cli/releases/latest"))
-                    .build();
-            HttpResponse<String> response =
-                    client.send(request, HttpResponse.BodyHandlers.ofString());
-            logger.debug("Received {} status code from GitHub API", response.statusCode());
-
-            JsonObject jsonObject = GSON.fromJson(response.body(), JsonObject.class);
-            if (jsonObject.has("tag_name")) {
-                JsonElement tagNameElement = jsonObject.get("tag_name");
-                if (tagNameElement.isJsonPrimitive()) {
-                    JsonPrimitive tagNamePrimitive = tagNameElement.getAsJsonPrimitive();
-                    if (tagNamePrimitive.isString()) {
-                        logger.debug("getLatestWakatimeVersion returns: " + tagNameElement.getAsString());
-                        return tagNameElement.getAsString();
-                    }
-                }
-            }
-
-            logger.debug("Unable to get the latest Wakatime version!");
-            return null;
-        } catch (IOException | InterruptedException exception) {
-            logger.error("Error getting latest Wakatime version!", exception);
-            return null;
-        }
-    }
-
-    private static Path downloadWakatimeCLI(String version, String osName, String architecture, Path path) {
-        try {
-            String fileName = "wakatime-cli-%s-%s.zip".formatted(osName, architecture);
-            String url = "https://github.com/wakatime/wakatime-cli/releases/download/%s/%s".formatted(version, fileName);
-            fileName = "wakatime-cli-%s.zip".formatted(version);
-            Path filePath = path.resolve(fileName);
-
-            InputStream inputStream = new URI(url).toURL().openStream();
-            Files.createDirectories(path);
-            Files.copy(inputStream, filePath, StandardCopyOption.REPLACE_EXISTING);
-
-            logger.debug("Downloaded Wakatime CLI to {}", filePath);
-            return filePath;
-        } catch (IOException | URISyntaxException exception) {
-            logger.error("Error downloading Wakatime CLI!", exception);
-            return null;
-        }
-    }
-
-    private static void checkMissingPlatformSupport() {
-        String osname = osname();
-        String arch = architecture();
-
-        String[] validCombinations = {
-                "darwin-amd64",
-                "darwin-arm64",
-                "freebsd-386",
-                "freebsd-amd64",
-                "freebsd-arm",
-                "linux-386",
-                "linux-amd64",
-                "linux-arm",
-                "linux-arm64",
-                "netbsd-386",
-                "netbsd-amd64",
-                "netbsd-arm",
-                "openbsd-386",
-                "openbsd-amd64",
-                "openbsd-arm",
-                "openbsd-arm64",
-                "windows-386",
-                "windows-amd64",
-                "windows-arm64",
-        };
-
-        if (!Arrays.asList(validCombinations).contains(osname + "-" + arch))
-            throw new RuntimeException("OS not supported!");
-    }
-
-    public static String osname() {
-        if (isWindows())
-            return "windows";
-
-        String os = System.getProperty("os.name").toLowerCase();
-        if (os.contains("mac") || os.contains("darwin"))
-            return "darwin";
-
-        if (os.contains("linux"))
-            return "linux";
-
-        return os;
-    }
-
-    public static boolean isWindows() {
-        return System.getProperty("os.name").contains("Windows");
-    }
-
-    public static String architecture() {
-        String arch = System.getProperty("os.arch");
-        if (arch.contains("386") || arch.contains("32"))
-            return "386";
-
-        if (arch.equals("aarch64"))
-            return "arm64";
-
-        if (osname().equals("darwin") && arch.contains("arm"))
-            return "arm64";
-
-        if (arch.contains("64"))
-            return "amd64";
-
-        return arch;
     }
 }

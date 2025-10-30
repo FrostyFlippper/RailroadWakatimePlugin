@@ -1,58 +1,20 @@
 package org.FrostyFlippper;
 
+import lombok.Getter;
 import java.math.BigDecimal;
 
+@Getter
 public class Heartbeat {
-    private String entity;
-    private Integer lineCount;
-    private Integer lineNumber;
-    private Integer cursorPosition;
-    private BigDecimal timestamp;
-    private Boolean isWrite;
-    private Boolean isUnsavedFile;
-    private String project;
-    private String language;
-    private Boolean isBuilding;
-
-    public String getEntity() {
-        return entity;
-    }
-
-    public Integer getLineCount() {
-        return lineCount;
-    }
-
-    public Integer getLineNumber() {
-        return lineNumber;
-    }
-
-    public Integer getCursorPosition() {
-        return cursorPosition;
-    }
-
-    public BigDecimal getTimestamp() {
-        return timestamp;
-    }
-
-    public Boolean isWrite() {
-        return isWrite;
-    }
-
-    public Boolean isUnsavedFile() {
-        return isUnsavedFile;
-    }
-
-    public String getProject() {
-        return project;
-    }
-
-    public String getLanguage() {
-        return language;
-    }
-
-    public Boolean isBuilding() {
-        return isBuilding;
-    }
+    private final String entity;
+    private final Integer lineCount;
+    private final Integer lineNumber;
+    private final Integer cursorPosition;
+    private final BigDecimal timestamp;
+    private final Boolean isWrite;
+    private final Boolean isUnsavedFile;
+    private final String project;
+    private final String language;
+    private final Boolean isBuilding;
 
     private Heartbeat(Builder builder){
         this.entity = builder.entity;
